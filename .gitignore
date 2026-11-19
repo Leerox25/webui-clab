@@ -1,0 +1,14 @@
+# Environnement Python local (reconstruit par run.sh)
+.venv/
+__pycache__/
+*.py[cod]
+
+# Donnees d'execution du laboratoire : topologie sauvegardee, configurations
+# generees, laboratoire containerlab. Recree par l'application au deploiement.
+lab/
+
+# Divers systeme
+.DS_Store
+
+# Archives de sauvegarde
+*.zip

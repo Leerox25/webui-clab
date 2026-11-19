@@ -1,0 +1,23 @@
+services:
+  webui-clab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: webui-clab
+    privileged: true
+    pid: host
+    # L'application écoute sur 5001 : on publie le même port (5001:5000 ne
+    # correspondait à aucun port en écoute dans le conteneur).
+    ports:
+      - "5001:5001"
+    environment:
+      # Chemin absolu de l'hôte : il doit être IDENTIQUE dans le conteneur et
+      # sur l'hôte, car les binds du YAML containerlab (configs/*.json) sont
+      # résolus par le démon Docker de l'hôte (Docker Desktop), pas par le
+      # conteneur applicatif.
+      LAB_DIR: ${PWD}/lab
+      CLAB_SUDO: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PWD}/lab:${PWD}/lab
+    restart: unless-stopped
