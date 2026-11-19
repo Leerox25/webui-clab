@@ -29,7 +29,7 @@ RUN set -eu; \
 RUN containerlab version
 
 WORKDIR /app
-COPY app.py /app/app.py
+COPY app.py extras.py /app/
 COPY static/ /app/static/
 
 ENV LAB_DIR=/lab \
