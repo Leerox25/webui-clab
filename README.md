@@ -7,25 +7,27 @@ Interface web locale pour dessiner une topologie, sauvegarder son état et produ
 - Ubuntu (natif ou WSL2) et Python 3.
 - Docker installé et démarré; votre utilisateur doit pouvoir l'utiliser (groupe `docker` ou accès via le mécanisme de votre installation).
 - Containerlab installé; vérifier avec `containerlab version`.
-- Paquets Python Ubuntu `python3-flask` et `python3-yaml` (installés par `install.sh`).
+- Flask et PyYAML : `install.sh` utilise les paquets Ubuntu `python3-flask` et `python3-yaml` s'ils sont disponibles, sinon il crée un environnement virtuel `.venv` local au projet.
 - Accès réseau au CDN Unpkg pour charger Cytoscape.js dans le navigateur.
 
 Docker et Containerlab s'installent selon leur documentation officielle respective. Sur WSL, utilisez WSL2 et Docker Desktop avec l'intégration WSL activée, ou un démon Docker local. Le déploiement nécessite une installation Containerlab fonctionnelle dans le même environnement Linux que l'application.
 
 ## Installation et lancement
 
-Décompressez l'archive dans un dossier, puis :
+L'application s'installe **sur place**, dans le dossier du projet : rien n'est
+écrit en dehors (aucun fichier dans `$HOME`).
 
 ```bash
 cd webui-clab
-bash install.sh
-cd "$HOME/labs/webui"
-python3 app.py
+bash install.sh     # dépendances Python + image des nœuds lab01/node
+./run.sh            # lance l'application
 ```
 
 Ouvrez ensuite <http://localhost:5001>. Arrêtez le serveur avec `Ctrl+C`. L'application écoute sur toutes les interfaces (`0.0.0.0`) pour faciliter certains environnements; ne l'exposez pas à un réseau non fiable.
 
-L'état sauvegardé est écrit dans `~/labs/webui/lab/state.json`; le fichier Containerlab généré est `~/labs/webui/lab/lab.clab.yml`.
+Le laboratoire est créé dans `./lab`, à côté de l'application : l'état sauvegardé
+est `lab/state.json` et le fichier Containerlab généré `lab/lab.clab.yml`. Un autre
+emplacement peut être choisi avec la variable d'environnement `LAB_DIR`.
 
 ## Autoriser Containerlab sans mot de passe (sudoers)
 

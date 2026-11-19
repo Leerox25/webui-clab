@@ -11,7 +11,11 @@ from flask import Flask, jsonify, request, send_from_directory
 import yaml
 
 app = Flask(__name__, static_folder="static")
-LAB_DIR = Path(os.environ.get("LAB_DIR", str(Path.home() / "labs" / "webui" / "lab"))).expanduser()
+# Par défaut le laboratoire est créé dans ./lab, à côté de l'application : aucune
+# écriture n'est imposée en dehors du dossier du projet. La variable
+# d'environnement LAB_DIR permet de choisir un autre emplacement.
+BASE_DIR = Path(__file__).resolve().parent
+LAB_DIR = Path(os.environ.get("LAB_DIR", str(BASE_DIR / "lab"))).expanduser()
 STATE_FILE = LAB_DIR / "state.json"
 TOPO_FILE = LAB_DIR / "lab.clab.yml"
 CONFIG_DIR = LAB_DIR / "configs"
