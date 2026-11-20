@@ -10,6 +10,8 @@ import subprocess
 from flask import Flask, jsonify, request, send_from_directory
 import yaml
 
+import extras
+
 app = Flask(__name__, static_folder="static")
 # Par défaut le laboratoire est créé dans ./lab, à côté de l'application : aucune
 # écriture n'est imposée en dehors du dossier du projet. La variable
@@ -257,8 +259,11 @@ def clean_ip_config(cfg):
             if not MAC_RE.fullmatch(mac):
                 raise ValueError(f"{dev} : adresse MAC invalide.")
             item["mac"] = mac
+        link = extras.clean_link(dev, iface.get("link"))
+        if link:
+            item["link"] = link
         if not dhcp and not ipv4 and not ipv6 and not item.get("vlan") and not item.get("gre") \
-                and "mtu" not in item and "mac" not in item:
+                and "mtu" not in item and "mac" not in item and "link" not in item:
             raise ValueError(f"{dev} : précisez une adresse, DHCP, un VLAN, un MTU ou une MAC.")
         out["ifaces"].append(item)
 
@@ -280,6 +285,9 @@ def clean_ip_config(cfg):
             item["dev"] = dev
         if not via and not dev:
             raise ValueError("Une route doit préciser une passerelle (via) ou une interface (dev).")
+        metric = extras.clean_metric(route.get("metric"))
+        if metric:
+            item["metric"] = metric
         out["routes"].append(item)
 
     ds = cfg.get("dhcpServer")
@@ -341,6 +349,7 @@ def clean_ospf_config(cfg):
         if not isinstance(area, dict):
             raise ValueError("Aire OSPF invalide.")
         item = {"id": clean_area_id(area.get("id"))}
+        extras.clean_area_type(area, item)
         networks = area.get("networks") or []
         if not isinstance(networks, list) or not networks:
             raise ValueError(f"OSPF aire {item['id']} : aucun réseau annoncé.")
@@ -374,6 +383,7 @@ def clean_ospf_config(cfg):
         costs[str(dev)] = cost
     if costs:
         out["costs"] = costs
+    extras.clean_ospf_extra(cfg, out)
     return out
 
 
@@ -863,6 +873,8 @@ def clean_state(data):
             cfg = clean_switch_config(n.get("config"))
             if cfg is not None:
                 node["config"] = cfg
+            if n.get("l3") is True:  # switch niveau 3 (routage) : simple marqueur, sans effet sur le déploiement
+                node["l3"] = True
         ip_cfg = clean_ip_config(n.get("ip"))
         if ip_cfg is not None:
             node["ip"] = ip_cfg
@@ -884,6 +896,15 @@ def clean_state(data):
         ipsec_cfg = clean_ipsec_config(n.get("ipsec"))
         if ipsec_cfg is not None:
             node["ipsec"] = ipsec_cfg
+        for key, cleaner in (("rip", extras.clean_rip_config), ("eigrp", extras.clean_eigrp_config),
+                             ("isis", extras.clean_isis_config)):
+            extra_cfg = cleaner(n.get(key))
+            if extra_cfg is not None:
+                node[key] = extra_cfg
+        if n["type"] == "switch":
+            l2_cfg = extras.clean_l2_config(n.get("l2"))
+            if l2_cfg is not None:
+                node["l2"] = l2_cfg
         check_ipsec_consistency(node)
         check_mpls_consistency(node)
         check_vrrp_consistency(node)
@@ -974,9 +995,19 @@ def build_lab(state):
         d = {"kind": "linux", "image": NODE_IMAGE}
         cfg = {"id": node["id"], "type": node["type"]}
         if node["type"] == "switch":
-            cfg["switch"] = switch_config(node, aggregate_ports(node, node_ports[node["id"]]))
+            sw_ports = aggregate_ports(node, node_ports[node["id"]])
+            if node.get("l3"):
+                # Port routé d'un switch L3 (« no switchport ») : il porte une adresse IP
+                # et ne rejoint donc pas le bridge.
+                routed = {i["dev"] for i in (node.get("ip") or {}).get("ifaces", [])
+                          if PORT_RE.fullmatch(i["dev"]) and "vlan" not in i and "gre" not in i}
+                sw_ports = [p for p in sw_ports if p not in routed]
+            cfg["switch"] = switch_config(node, sw_ports)
         if node.get("ip"):
-            cfg["ip"] = node["ip"]
+            ip_cfg = dict(node["ip"])
+            # Les routes à métrique (routes flottantes) sont posées en fin de démarrage.
+            ip_cfg["routes"] = [r for r in ip_cfg.get("routes", []) if "metric" not in r]
+            cfg["ip"] = ip_cfg
         if node.get("ospf"):
             cfg["ospf"] = node["ospf"]
         if node.get("vrrp"):
@@ -989,6 +1020,13 @@ def build_lab(state):
             cfg["mpls"] = node["mpls"]
         if node.get("ipsec"):
             cfg["ipsec"] = node["ipsec"]
+        frr_lines, frr_daemons = extras.frr_extra(node)
+        if frr_lines:
+            cfg["frrExtra"] = frr_lines
+            cfg["frrDaemons"] = frr_daemons
+        tune = extras.tune_commands(node)
+        if tune:
+            cfg["tune"] = tune
         # Un nœud sans configuration n'a pas besoin de bind : son entrypoint
         # s'arrête proprement.
         if len(cfg) > 2:

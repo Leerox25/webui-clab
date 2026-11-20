@@ -217,7 +217,7 @@ fi
 # FRR : OSPF et/ou VRRP. Le vrrpd de FRR ne crée pas les interfaces macvlan
 # nécessaires : elles doivent exister avant le démarrage des démons, en mode
 # bridge, avec la MAC virtuelle 00:00:5e:00:01:<VRID>.
-if jq -e '.ospf or .vrrp or .bgp or .mpls' "$CFG" >/dev/null 2>&1; then
+if jq -e '.ospf or .vrrp or .bgp or .mpls or .frrExtra' "$CFG" >/dev/null 2>&1; then
     mkdir -p /var/run/frr /var/log/frr
     chown frr:frr /var/run/frr 2>/dev/null
     chmod 775 /var/run/frr 2>/dev/null
@@ -362,6 +362,8 @@ if jq -e '.ospf or .vrrp or .bgp or .mpls' "$CFG" >/dev/null 2>&1; then
                     echo "!"
                 done
         fi
+        # Options avancées (OSPF étendu, RIP, EIGRP, IS-IS…) : lignes rendues par app.py.
+        jq -r '(.frrExtra // [])[]' "$CFG"
         echo "line vty"
         echo "!"
     } > /etc/frr/frr.conf
@@ -382,6 +384,10 @@ if jq -e '.ospf or .vrrp or .bgp or .mpls' "$CFG" >/dev/null 2>&1; then
     if jq -e '.mpls' "$CFG" >/dev/null 2>&1; then
         sed -i 's/^ldpd=no/ldpd=yes/' /etc/frr/daemons
     fi
+
+    for d in $(jq -r '(.frrDaemons // [])[]' "$CFG" 2>/dev/null); do
+        sed -i "s/^${d}=no/${d}=yes/" /etc/frr/daemons
+    done
 
     /usr/lib/frr/frrinit.sh start
     log "FRR démarré (router-id ${RID:-automatique})"
@@ -428,6 +434,16 @@ if jq -e '.ipsec' "$CFG" >/dev/null 2>&1; then
         swanctl --initiate --child "$nom" >/dev/null 2>&1
     done
     log "IPsec chargé ($(jq -r '(.ipsec.connections // []) | length' "$CFG") connexion(s))"
+fi
+
+# --------------------------------------------------- réglages noyau avancés
+# STP par port, timers du bridge, netem (qualité de lien), routes à métrique :
+# commandes rendues par app.py. Un échec est journalisé sans arrêter le nœud.
+if jq -e '.tune' "$CFG" >/dev/null 2>&1; then
+    jq -r '(.tune // [])[]' "$CFG" | while IFS= read -r cmd; do
+        [ -n "$cmd" ] || continue
+        if sh -c "$cmd" >/dev/null 2>&1; then log "ok : $cmd"; else log "ÉCHEC : $cmd"; fi
+    done
 fi
 
 log "nœud prêt"

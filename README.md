@@ -66,6 +66,18 @@ Remplacez `<user>` par le nom système exact retourné par `whoami`. Si `which c
 - **Déployer** génère `lab.clab.yml` puis appelle `sudo containerlab deploy -t … --reconfigure`. **Détruire** appelle `sudo containerlab destroy -t … --cleanup`.
 - **Test rapide** exécute `docker exec clab-webui-<nœud> sh -c <commande>` et affiche stdout/stderr dans la console (ex. `r1` / `ip a`).
 
+## Options avancées (programme CCNP)
+
+Toutes optionnelles : sans réglage, la configuration générée est identique à avant. Elles sont validées par `extras.py`, puis rendues en lignes `frr.conf` (OSPF étendu, RIP, EIGRP, IS-IS) ou en commandes noyau exécutées en fin de démarrage (STP par port, timers du bridge, `netem`, routes à métrique). `python -m unittest discover tests` vérifie le rendu sans Docker.
+
+- **OSPF** (« Options avancées ») : `auto-cost reference-bandwidth`, `default-information originate [always]`, redistribution, types d'aire (stub, totally stubby, NSSA), et par interface : type de réseau, hello/dead, priorité DR, authentification MD5, BFD.
+- **RIP v2**, **EIGRP** (démon `eigrpd` de FRR, expérimental) et **IS-IS** (NET, niveau, métrique, point à point, passive) : onglets du menu *Routage*.
+- **Routes flottantes** : champ « Métrique » d'une route statique (distance administrative plus haute = route de secours).
+- **STP avancé** (switch) : timers hello / forward-delay / max-age, vieillissement MAC, IGMP snooping, et par port : coût, priorité, root guard, BPDU guard. Le STP du noyau est un 802.1D classique : ni RSTP/MSTP, ni PortFast.
+- **Simulation de lien** (carte d'interface) : délai, gigue, perte et débit via `tc netem`.
+- **Switch L3** : SVI multiples et **ports routés** (un port avec une adresse IP sort du bridge, comme « no switchport »).
+- Non disponible dans l'image : HSRP/GLBP (propriétaires), VRF, NAT et ACL (noyau sans netfilter), PortFast. Ces options n'ont **pas été déployées** : seul leur rendu est testé.
+
 ## Limites et sécurité
 
 - Cytoscape.js est chargé depuis Unpkg : une connexion au CDN est nécessaire. Les annotations (textes et zones) ne figurent pas dans le YAML Containerlab.
