@@ -36,7 +36,7 @@ Docker Desktop exécute les conteneurs dans une VM Linux. Containerlab est conç
 
 Sur Apple Silicon, les images `frrouting/frr` et `alpine` utilisées par l’éditeur sont multi-architecture. Des images tierces ou des équipements demandant une architecture/capacité particulière peuvent nécessiter une configuration spécifique. Les performances et le comportement réseau peuvent différer d’un hôte Linux natif.
 
-L’éditeur utilise Cytoscape.js depuis un CDN Unpkg : le navigateur a besoin d’un accès Internet pour charger cette bibliothèque. Gardez Docker Desktop démarré pendant l’utilisation.
+Cytoscape.js est embarqué dans `static/vendor/` : l’interface fonctionne sans accès Internet. Gardez Docker Desktop démarré pendant l’utilisation.
 
 ## Fichiers fournis
 

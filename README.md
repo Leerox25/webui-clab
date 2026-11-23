@@ -8,7 +8,6 @@ Interface web locale pour dessiner une topologie, sauvegarder son état et produ
 - Docker installé et démarré; votre utilisateur doit pouvoir l'utiliser (groupe `docker` ou accès via le mécanisme de votre installation).
 - Containerlab installé; vérifier avec `containerlab version`.
 - Flask et PyYAML : `install.sh` utilise les paquets Ubuntu `python3-flask` et `python3-yaml` s'ils sont disponibles, sinon il crée un environnement virtuel `.venv` local au projet.
-- Accès réseau au CDN Unpkg pour charger Cytoscape.js dans le navigateur.
 
 Docker et Containerlab s'installent selon leur documentation officielle respective. Sur WSL, utilisez WSL2 et Docker Desktop avec l'intégration WSL activée, ou un démon Docker local. Le déploiement nécessite une installation Containerlab fonctionnelle dans le même environnement Linux que l'application.
 
@@ -80,7 +79,7 @@ Toutes optionnelles : sans réglage, la configuration générée est identique �
 
 ## Limites et sécurité
 
-- Cytoscape.js est chargé depuis Unpkg : une connexion au CDN est nécessaire. Les annotations (textes et zones) ne figurent pas dans le YAML Containerlab.
+- Cytoscape.js est embarqué dans `static/vendor/` : l'interface fonctionne sans accès Internet. Les annotations (textes et zones) ne figurent pas dans le YAML Containerlab.
 - La suppression des conteneurs/ressources Containerlab est une action destructive. Aucun déploiement n'est lancé sans action explicite; la destruction demande confirmation dans l'interface.
 - Le serveur Flask n'intègre ni authentification, ni HTTPS, ni protection CSRF et écoute sur `0.0.0.0`. Utilisez-le sur une machine/réseau de confiance seulement. `/api/exec` permet d'exécuter une commande dans un conteneur du laboratoire.
 - Les images des nœuds sont génériques; la configuration avancée des équipements et les paramètres propres à chaque scénario ne sont pas gérés par cet éditeur.
