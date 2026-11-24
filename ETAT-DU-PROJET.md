@@ -41,8 +41,8 @@ Démons disponibles dans l'image : `bgpd`, `ospfd`, `ospf6d`, `isisd`, `ripd`,
 
 ## Prochaines étapes proposées
 
-1. **WireGuard** — dernier protocole du brief d'origine.
-2. Puis, selon l'envie : **SR-MPLS** (Segment Routing), OSPFv3, IS-IS, BFD,
+1. WireGuard : abandonné (24/11/2026), on garde GRE sur IPsec.
+2. Selon l'envie : **SR-MPLS** (Segment Routing), OSPFv3, IS-IS, BFD,
    `tc`/netem (simulation de panne), BGP EVPN + VXLAN, IPsec *route-based* via VTI.
 
 ## Pièges rencontrés (à ne pas rechercher deux fois)
@@ -56,9 +56,20 @@ Démons disponibles dans l'image : `bgpd`, `ospfd`, `ospf6d`, `isisd`, `ripd`,
   La validation le refuse désormais.
 - **VRRP** : `vrrpd` de FRR ne crée pas ses interfaces macvlan, et l'option
   `addrgenmode random` fait échouer leur création sur ce noyau.
+- **GRE sur IPsec** : le plugin strongSwan `bypass-lan` exempte les sous-réseaux
+  connectés, donc deux routeurs d'un même sous-réseau échangeaient le GRE en clair
+  (SA établie, 0 octet). L'entrypoint désactive ce plugin.
+- **LDP** : FRR exige `discovery transport-address` ; l'entrypoint prend le router-id
+  par défaut (sinon « Incomplete config » et aucun voisin).
+- **Démarrage FRR** : une fois, `zebra` n'a pas démarré sur un nœud (watchfrr « 9/10
+  daemons running »), non reproduit ensuite. Redéployer si un nœud n'a pas de routes.
 - **IPsec** : charon est à `/usr/lib/strongswan/charon` sur Alpine ; les secrets PSK
   doivent être nommés `ike-<nom>` (sinon « unsupported secret ») ; amorcer les deux
-  côtés crée deux CHILD SA — le mode `trap` par défaut évite cela.
+  côtés crée deux tunnels concurrents : si les deux sont en `start`, app.py
+  (`ipsec_initiator`) ne laisse amorcer que l'adresse la plus basse. Au boot, le pair
+  refuse parfois (config pas encore chargée) et strongSwan abandonne pour de bon :
+  l'entrypoint réessaie en boucle tant qu'aucune IKE SA n'existe. `start` est rendu
+  en `trap` + cette boucle, pour que le tunnel se rétablisse au premier paquet.
 - **GRE** : impossible de créer le tunnel avant que son adresse locale existe.
 - **IP-in-IP** (`type ipip`) fait **planter la VM Docker Desktop** : à ne jamais
   utiliser dans une sonde. Un crash de la VM laisse les conteneurs clab sans leurs

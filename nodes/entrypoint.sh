@@ -217,7 +217,7 @@ fi
 # FRR : OSPF et/ou VRRP. Le vrrpd de FRR ne crée pas les interfaces macvlan
 # nécessaires : elles doivent exister avant le démarrage des démons, en mode
 # bridge, avec la MAC virtuelle 00:00:5e:00:01:<VRID>.
-if jq -e '.ospf or .vrrp or .bgp or .mpls or .frrExtra' "$CFG" >/dev/null 2>&1; then
+if jq -e '(.type == "router" or .type == "switch") or .ospf or .vrrp or .bgp or .mpls or .frrExtra' "$CFG" >/dev/null 2>&1; then
     mkdir -p /var/run/frr /var/log/frr
     chown frr:frr /var/run/frr 2>/dev/null
     chmod 775 /var/run/frr 2>/dev/null
@@ -279,6 +279,7 @@ if jq -e '.ospf or .vrrp or .bgp or .mpls or .frrExtra' "$CFG" >/dev/null 2>&1; 
         if jq -e '.mpls' "$CFG" >/dev/null 2>&1; then
             LDPRID=$(jqr '.mpls.ldp.routerId')
             LDPTA=$(jqr '.mpls.ldp.transportAddress // ""')
+            [ -n "$LDPTA" ] || LDPTA=$LDPRID  # FRR exige un transport-address ; défaut annoncé par l'UI
             # Deux contraintes de forme, vérifiées en test réel :
             #  - le sous-nœud « interface » se referme par « exit » (sinon
             #    « exit-address-family » est interprété dans le mauvais contexte) ;
@@ -372,14 +373,11 @@ if jq -e '.ospf or .vrrp or .bgp or .mpls or .frrExtra' "$CFG" >/dev/null 2>&1; 
 
     # zebra et staticd sont toujours lancés par frrinit.sh ; les autres démons
     # doivent être explicitement activés dans /etc/frr/daemons.
-    if jq -e '.ospf' "$CFG" >/dev/null 2>&1; then
-        sed -i 's/^ospfd=no/ospfd=yes/' /etc/frr/daemons
-    fi
+    # Démons toujours actifs (sans config ils restent inactifs) : tout est configurable
+    # depuis vtysh. vrrpd et ldpd restent liés à l'UI (macvlan, platform_labels).
+    sed -i -E 's/^(ospfd|bgpd|ripd|isisd|eigrpd|bfdd)=no/\1=yes/' /etc/frr/daemons
     if jq -e '.vrrp' "$CFG" >/dev/null 2>&1; then
         sed -i 's/^vrrpd=no/vrrpd=yes/' /etc/frr/daemons
-    fi
-    if jq -e '.bgp' "$CFG" >/dev/null 2>&1; then
-        sed -i 's/^bgpd=no/bgpd=yes/' /etc/frr/daemons
     fi
     if jq -e '.mpls' "$CFG" >/dev/null 2>&1; then
         sed -i 's/^ldpd=no/ldpd=yes/' /etc/frr/daemons
@@ -399,6 +397,7 @@ fi
 if jq -e '.ipsec' "$CFG" >/dev/null 2>&1; then
     log "configuration IPsec (strongSwan / IKEv2)"
     mkdir -p /etc/swanctl/conf.d
+    # keyingtries = 0 : réessaie sans fin tant que le pair n'est pas prêt (défaut : un essai).
     {
         echo "connections {"
         jq -r '(.ipsec.connections // [])[] |
@@ -406,6 +405,7 @@ if jq -e '.ipsec' "$CFG" >/dev/null 2>&1; then
             "    local_addrs = \(.localAddrs)\n" +
             "    remote_addrs = \(.remoteAddrs)\n" +
             "    version = 2\n" +
+            "    keyingtries = 0\n" +
             "    proposals = \(.proposals)\n" +
             "    local {\n      auth = psk\n      id = \(.localId)\n    }\n" +
             "    remote {\n      auth = psk\n      id = \(.remoteId)\n    }\n" +
@@ -413,7 +413,7 @@ if jq -e '.ipsec' "$CFG" >/dev/null 2>&1; then
             "        local_ts = \(.localTs | join(","))\n" +
             "        remote_ts = \(.remoteTs | join(","))\n" +
             "        esp_proposals = \(.espProposals)\n" +
-            "        start_action = \(.startAction)\n" +
+            "        start_action = \(if .startAction == "start" then "trap" else .startAction end)\n" +
             "      }\n    }\n  }"' "$CFG"
         echo "}"
         echo "secrets {"
@@ -424,14 +424,22 @@ if jq -e '.ipsec' "$CFG" >/dev/null 2>&1; then
         echo "}"
     } > /etc/swanctl/conf.d/lab01.conf
 
+    # bypass-lan exempte de chiffrement les sous-réseaux locaux : or les routeurs d'un
+    # même sous-réseau (GRE sur IPsec) doivent être chiffrés entre eux.
+    echo 'bypass-lan { load = no }' > /etc/strongswan.d/charon/bypass-lan.conf
     /usr/lib/strongswan/charon >/dev/null 2>&1 &
     sleep 4
     swanctl --load-all 2>&1 | grep -iE 'loaded|error' | tail -3
-    # Amorçage uniquement pour les connexions en « start ». Avec le mode « trap »
-    # (défaut), le tunnel s'établit au premier paquet : forcer l'amorçage des
-    # deux côtés crée deux CHILD SA concurrents, chacun utilisé dans un sens.
+    # « start » = trap (rétablit le tunnel au premier paquet) + amorçage ici. Au boot,
+    # le pair n'a parfois pas encore chargé sa config et refuse : strongSwan prend ce
+    # refus pour définitif, d'où la boucle tant qu'aucune IKE SA n'existe (5 min max).
+    # app.py ne laisse qu'une extrémité en « start » (sinon deux tunnels concurrents).
     for nom in $(jq -r '(.ipsec.connections // [])[] | select(.startAction == "start") | .name' "$CFG"); do
-        swanctl --initiate --child "$nom" >/dev/null 2>&1
+        ( n=0
+          while [ "$n" -lt 60 ] && ! swanctl --list-sas --ike "$nom" 2>/dev/null | grep -q "^$nom:"; do
+              swanctl --initiate --child "$nom" --timeout 15 >/dev/null 2>&1
+              n=$((n + 1)); sleep 5
+          done ) &
     done
     log "IPsec chargé ($(jq -r '(.ipsec.connections // []) | length' "$CFG") connexion(s))"
 fi

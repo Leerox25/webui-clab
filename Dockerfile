@@ -15,6 +15,7 @@ RUN apt-get update \
         python3-flask \
         python3-yaml \
         sudo \
+        ttyd \
     && rm -rf /var/lib/apt/lists/*
 
 # Use the official Containerlab installer in containerlab-only mode. It configures
