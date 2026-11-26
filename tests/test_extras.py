@@ -123,5 +123,19 @@ class RoutedPorts(unittest.TestCase):
         self.assertEqual(sorted(lab(nodes, [("sw1", "r1")])["sw1"]["switch"]["ports"]), ["eth1"])
 
 
+class Ipsec(unittest.TestCase):
+    def test_single_initiator_when_both_start(self):
+        def gw(i, me, peer, action):
+            return {"id": i, "type": "router", "ip": {"ifaces": [{"dev": "eth1", "ipv4": me + "/24"}]},
+                    "ipsec": {"connections": [{"name": "t", "localAddrs": me, "remoteAddrs": peer,
+                              "localId": i, "remoteId": "x", "psk": "k", "localTs": me + "/32",
+                              "remoteTs": peer + "/32", "startAction": action}]}}
+        action = lambda cfgs, n: cfgs[n]["ipsec"]["connections"][0]["startAction"]
+        cfgs = lab([gw("r1", "10.0.0.1", "10.0.0.2", "start"), gw("r2", "10.0.0.2", "10.0.0.1", "start")], [("r1", "r2")])
+        self.assertEqual((action(cfgs, "r1"), action(cfgs, "r2")), ("start", "trap"))
+        cfgs = lab([gw("r1", "10.0.0.1", "10.0.0.2", "trap"), gw("r2", "10.0.0.2", "10.0.0.1", "start")], [("r1", "r2")])
+        self.assertEqual((action(cfgs, "r1"), action(cfgs, "r2")), ("trap", "start"))
+
+
 if __name__ == "__main__":
     unittest.main()

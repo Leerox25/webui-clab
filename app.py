@@ -5,6 +5,7 @@ import ipaddress
 import json
 import os
 import re
+import socket
 import subprocess
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -986,6 +987,22 @@ def aggregate_ports(node, ports):
     return kept
 
 
+def ipsec_initiator(ipsec, nodes):
+    """Deux extrémités en « start » s'amorcent en même temps et créent deux tunnels
+    concurrents : seule l'adresse la plus basse amorce, l'autre attend (trap)."""
+    starts = {(c["localAddrs"], c["remoteAddrs"]) for n in nodes
+              for c in (n.get("ipsec") or {}).get("connections", []) if c["startAction"] == "start"}
+    conns = []
+    for c in ipsec["connections"]:
+        local, remote = c["localAddrs"], c["remoteAddrs"]
+        if (c["startAction"] == "start" and (remote, local) in starts
+                and "%" not in local + remote
+                and ipaddress.IPv4Address(local) > ipaddress.IPv4Address(remote)):
+            c = {**c, "startAction": "trap"}
+        conns.append(c)
+    return {"connections": conns}
+
+
 def build_lab(state):
     """Retourne (dict containerlab, {id_noeud: config de nœud})."""
     state = clean_state(state)
@@ -1019,7 +1036,7 @@ def build_lab(state):
         if node.get("mpls"):
             cfg["mpls"] = node["mpls"]
         if node.get("ipsec"):
-            cfg["ipsec"] = node["ipsec"]
+            cfg["ipsec"] = ipsec_initiator(node["ipsec"], state["nodes"])
         frr_lines, frr_daemons = extras.frr_extra(node)
         if frr_lines:
             cfg["frrExtra"] = frr_lines
@@ -1029,7 +1046,7 @@ def build_lab(state):
             cfg["tune"] = tune
         # Un nœud sans configuration n'a pas besoin de bind : son entrypoint
         # s'arrête proprement.
-        if len(cfg) > 2:
+        if len(cfg) > 2 or node["type"] == "router":  # un routeur a toujours FRR (vtysh)
             d["binds"] = [f"configs/{node['id']}.json:/etc/lab01/node.json:ro"]
             node_cfgs[node["id"]] = cfg
         nodes[node["id"]] = d
@@ -1119,7 +1136,6 @@ def detect_capabilities():
         "vlan": ip + "ip link add br0 type bridge vlan_filtering 1 && ip link del br0",
         "stp": ip + "ip link add br0 type bridge stp_state 1 && ip link del br0",
         "mpls": "modprobe mpls_router 2>/dev/null; test -e /proc/sys/net/mpls/platform_labels",
-        "wireguard": ip + "ip link add wg0 type wireguard && ip link del wg0",
     }
     for name, cmd in tests.items():
         caps["features"][name] = _probe(cmd)
@@ -1213,6 +1229,55 @@ def execute():
                     error=None if result.returncode == 0 else f"docker exec a retourné {result.returncode}.")
     except (ValueError, TypeError, OSError, subprocess.TimeoutExpired) as exc:
         return jsonify(ok=False, error=str(exc)), 500
+
+
+# ---------- Terminal web (ttyd) ----------
+# ttyd sert un terminal dans le navigateur pour une commande donnée : ici un
+# shell dans un nœud du laboratoire. Une session par nœud, relancée à la demande.
+TTYD_PORT_MIN = int(os.environ.get("TTYD_PORT_MIN", "7681"))
+TTYD_PORT_MAX = int(os.environ.get("TTYD_PORT_MAX", "7690"))
+_ttyd = {}
+
+
+def _ttyd_port():
+    for port in range(TTYD_PORT_MIN, TTYD_PORT_MAX + 1):
+        if any(s["port"] == port and s["proc"].poll() is None for s in _ttyd.values()):
+            continue
+        with socket.socket() as probe:
+            try:
+                probe.bind(("0.0.0.0", port))
+            except OSError:
+                continue
+        return port
+    return None
+
+
+@app.post("/api/terminal")
+def terminal():
+    try:
+        node = str((request.get_json(silent=True) or {}).get("node", "")).strip()
+        if not ID_RE.fullmatch(node):
+            raise ValueError("Nœud invalide.")
+        session = _ttyd.get(node)
+        if session and session["proc"].poll() is None:
+            return jsonify(ok=True, url=session["url"])
+        running = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}",
+                                  f"clab-{LAB_NAME}-{node}"], capture_output=True, text=True, check=False)
+        if running.stdout.strip() != "true":
+            raise ValueError(f"Le nœud {node} n'est pas déployé.")
+        port = _ttyd_port()
+        if port is None:
+            raise ValueError("Plus de terminal libre : fermez une session ouverte.")
+        proc = subprocess.Popen(
+            ["ttyd", "-W", "-p", str(port), "--once", "docker", "exec", "-it", f"clab-{LAB_NAME}-{node}",
+             # CLI Cisco (vtysh) si FRR tourne dans le nœud, sinon shell.
+             "sh", "-c", "pgrep zebra >/dev/null && exec vtysh || exec sh"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        url = f"http://{request.host.split(':')[0]}:{port}/"
+        _ttyd[node] = {"port": port, "proc": proc, "url": url}
+        return jsonify(ok=True, url=url)
+    except (ValueError, TypeError, OSError) as exc:
+        return jsonify(ok=False, error=str(exc)), 400
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ services:
     # correspondait à aucun port en écoute dans le conteneur).
     ports:
       - "5001:5001"
+      # Plage des terminaux web (ttyd) : une session par nœud, à la demande.
+      - "7681-7690:7681-7690"
     environment:
       # Chemin absolu de l'hôte : il doit être IDENTIQUE dans le conteneur et
       # sur l'hôte, car les binds du YAML containerlab (configs/*.json) sont
